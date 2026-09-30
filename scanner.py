@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
-# Сканер документов на OpenCV
-# Делает: находит углы, выравнивает через warpPerspective,
-# проверяет параллельность линий, считает строки и символы
 
 import argparse
 import cv2
 import numpy as np
 from pathlib import Path
 
-# какие расширения вообще поддерживаем
 exts = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"]
 
 
 def take_input(path):
-    # если передали файл - берём его, если папку - берём единственную картинку
     if path.is_file():
         if path.suffix.lower() not in exts:
             print("неизвестный формат:", path.suffix)
@@ -33,7 +28,6 @@ def take_input(path):
 
 
 def sort_corners(pts):
-    # надо разложить 4 точки как: левый-верх, правый-верх, правый-низ, левый-низ
     pts = pts.reshape(4, 2).astype(np.float32)
     out = np.zeros((4, 2), dtype=np.float32)
 
@@ -48,7 +42,6 @@ def sort_corners(pts):
 
 
 def find_corners(img):
-    # ищем границы страницы
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
 
@@ -102,16 +95,13 @@ def warp_doc(img, corners):
 
 
 def get_lines(img):
-    # находим все прямые отрезки и считаем их углы
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
     edges = cv2.Canny(gray, 50, 150)
 
-    # порог низкий, чтобы поймать заголовок и короткие строки
     thr = max(15, min(img.shape[:2]) // 15)
     minlen = max(20, min(img.shape[:2]) // 15)
 
-    # maxLineGap побольше, чтобы слова в заголовке сливались в одну линию
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=thr,
                             minLineLength=minlen, maxLineGap=25)
 
@@ -124,8 +114,6 @@ def get_lines(img):
 
     lines = np.asarray(lines).reshape(-1, 4)
 
-    # минимальная длина "настоящей" линии - 15% от меньшей стороны картинки
-    # ВАЖНО: img.shape[:2] - только высота и ширина, без каналов!
     real_len = min(img.shape[:2]) * 0.15
 
     for x1, y1, x2, y2 in lines:
@@ -152,7 +140,6 @@ def get_lines(img):
 
 
 def max_dev(angles):
-    # максимальное отклонение угла от медианы
     if len(angles) < 2:
         return None
     med = np.median(angles)
@@ -164,13 +151,11 @@ def max_dev(angles):
 
 
 def fix_skew(img):
-    # проверяем параллельность и если надо - подкручиваем
     _, horiz, vert = get_lines(img)
 
     h_dev = max_dev(horiz)
     v_dev = max_dev(vert)
 
-    # средний угол наклона линий
     cands = []
     if len(horiz) > 0:
         cands.append(np.median(horiz))
@@ -201,7 +186,6 @@ def fix_skew(img):
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
         rotated = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
 
-        # проверяем, стало ли лучше
         _, h2, v2 = get_lines(rotated)
         h_dev2 = max_dev(h2)
         v_dev2 = max_dev(v2)
@@ -236,20 +220,17 @@ def fix_skew(img):
 
 
 def count_text(img):
-    # считаем строки и символы без всякого OCR
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     bin_img = cv2.adaptiveThreshold(gray, 255,
                                     cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                     cv2.THRESH_BINARY_INV, 31, 12)
 
-    # убираем длинные горизонтальные линии - они мешают считать строки
     h_len = max(25, img.shape[1] // 8)
     h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_len, 1))
     h_lines = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, h_kernel)
     bin_img = cv2.subtract(bin_img, h_lines)
 
-    # то же самое для вертикальных
     v_len = max(25, img.shape[0] // 8)
     v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_len))
     v_lines = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, v_kernel)
@@ -285,7 +266,6 @@ def count_text(img):
 
 
 def draw_lines(img):
-    # рисуем только длинные отрезки, чтобы не замазать текст
     overlay = img.copy()
     segs, _, _ = get_lines(img)
 
@@ -311,16 +291,12 @@ def main():
         print("не смог открыть картинку:", src)
         return
 
-    # 1. ищем углы
     corners = find_corners(img)
 
-    # 2. выравниваем перспективу
     warped = warp_doc(img, corners)
 
-    # 3. правим наклон по линиям
     aligned, stats = fix_skew(warped)
 
-    # 4. считаем строки и символы
     lines_count, chars_count = count_text(aligned)
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -333,7 +309,6 @@ def main():
 
     cv2.imwrite(str(args.output / "lines.png"), draw_lines(aligned))
 
-    # краткий отчёт
     print()
     print("=" * 40)
     print("РЕЗУЛЬТАТ")
